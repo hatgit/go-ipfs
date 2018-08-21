@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	opts "github.com/ipfs/go-ipfs/namesys/opts"
 	"gx/ipfs/QmSaz8Qg77gGqvDvLKeSAY7ivDEnramSWF6T7TcRwFpHtP/go-unixfs"
 	path "gx/ipfs/QmYKNMEUK7nCVAefgXF1LVtZEZg3uRmBqiae4FJRXDNAyJ/go-path"
@@ -41,6 +42,10 @@ func testResolution(t *testing.T, resolver Resolver, name string, depth uint, ex
 func (r *mockResolver) resolveOnce(ctx context.Context, name string, opts *opts.ResolveOpts) (path.Path, time.Duration, error) {
 	p, err := path.ParsePath(r.entries[name])
 	return p, 0, err
+}
+
+func (r *mockResolver) secureResolveOnce(ctx context.Context, cw coreiface.ChunkWriter, name string, opts *opts.ResolveOpts) (path.Path, time.Duration, error) {
+	panic("not implemented")
 }
 
 func mockResolverOne() *mockResolver {

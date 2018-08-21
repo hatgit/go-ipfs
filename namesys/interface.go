@@ -35,6 +35,7 @@ import (
 
 	context "context"
 
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	opts "github.com/ipfs/go-ipfs/namesys/opts"
 	path "gx/ipfs/QmYKNMEUK7nCVAefgXF1LVtZEZg3uRmBqiae4FJRXDNAyJ/go-path"
 
@@ -81,6 +82,8 @@ type Resolver interface {
 	// users will be fine with this default limit, but if you need to
 	// adjust the limit you can specify it as an option.
 	Resolve(ctx context.Context, name string, options ...opts.ResolveOpt) (value path.Path, err error)
+
+	SecureResolve(ctx context.Context, cw coreiface.ChunkWriter, name string, options ...opts.ResolveOpt) (value path.Path, err error)
 }
 
 // Publisher is an object capable of publishing particular names.

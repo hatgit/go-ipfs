@@ -82,3 +82,47 @@ func resolvePath(ctx context.Context, ng ipld.NodeGetter, nsys namesys.NameSyste
 
 	return coreiface.NewResolvedPath(ipath, node.Cid(), root, gopath.Join(rest...)), nil
 }
+
+func (api *CoreAPI) SecureResolvePath(ctx context.Context, cw coreiface.ChunkWriter, p coreiface.Path) (coreiface.ResolvedPath, error) {
+	return secureResolvePath(ctx, cw, api.node.DAG, api.node.Namesys, p)
+}
+
+func secureResolvePath(ctx context.Context, cw coreiface.ChunkWriter, ng ipld.NodeGetter, nsys namesys.NameSystem, p coreiface.Path) (coreiface.ResolvedPath, error) {
+	if _, ok := p.(coreiface.ResolvedPath); ok {
+		return p.(coreiface.ResolvedPath), nil
+	}
+
+	ipath := ipfspath.Path(p.String())
+	ipath, err := core.SecureResolveIPNS(ctx, cw, nsys, ipath)
+	if err == core.ErrNoNamesys {
+		return nil, coreiface.ErrOffline
+	} else if err != nil {
+		return nil, err
+	}
+
+	var resolveOnce resolver.ResolveOnce
+
+	switch ipath.Segments()[0] {
+	case "ipfs":
+		resolveOnce = uio.SecureResolveUnixfsOnce(cw)
+	default:
+		return nil, fmt.Errorf("unsupported path namespace: %s", p.Namespace())
+	}
+
+	r := &resolver.Resolver{
+		DAG:         ng,
+		ResolveOnce: resolveOnce,
+	}
+
+	node, rest, err := r.ResolveToLastNode(ctx, ipath)
+	if err != nil {
+		return nil, err
+	}
+
+	root, err := cid.Parse(ipath.Segments()[1])
+	if err != nil {
+		return nil, err
+	}
+
+	return coreiface.NewResolvedPath(ipath, node.Cid(), root, gopath.Join(rest...)), nil
+}

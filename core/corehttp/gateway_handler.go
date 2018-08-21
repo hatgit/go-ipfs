@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	gopath "path"
@@ -63,7 +64,7 @@ func (i *gatewayHandler) newDagFromReader(r io.Reader) (ipld.Node, error) {
 
 // TODO(btc): break this apart into separate handlers using a more expressive muxer
 func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(i.node.Context(), time.Hour)
+	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	// the hour is a hard fallback, we don't expect it to happen, but just in case
 	defer cancel()
 
@@ -100,7 +101,10 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if r.Method == "GET" || r.Method == "HEAD" {
+	if r.Method == "GET" && r.Header.Get("X-Ipfs-Secure-Gateway") == "1" {
+		i.secureGetHandler(ctx, w, r)
+		return
+	} else if r.Method == "GET" || r.Method == "HEAD" {
 		i.getOrHeadHandler(ctx, w, r)
 		return
 	}
@@ -250,12 +254,12 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 	// and only if it's /ipfs!
 	// TODO: break this out when we split /ipfs /ipns routes.
 	modtime := time.Now()
-
-	if strings.HasPrefix(urlPath, ipfsPathPrefix) && !dir {
+	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
 		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
-
 		// set modtime to a really long time ago, since files are immutable and should stay cached
 		modtime = time.Unix(1, 0)
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=21600")
 	}
 
 	if !dir {
@@ -295,7 +299,7 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 		defer dr.Close()
 
 		// write to request
-		http.ServeContent(w, r, "index.html", modtime, dr)
+		http.ServeContent(w, r, "index.html", time.Now(), dr)
 		return
 	default:
 		internalWebError(w, err)
@@ -358,6 +362,107 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 	if err != nil {
 		internalWebError(w, err)
 		return
+	}
+}
+
+func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	urlPath := r.URL.Path
+	escapedURLPath := r.URL.EscapedPath()
+
+	// If the gateway is behind a reverse proxy and mounted at a sub-path,
+	// the prefix header can be set to signal this sub-path.
+	// It will be prepended to links in directory listings and the index.html redirect.
+	prefix := ""
+	if prfx := r.Header.Get("X-Ipfs-Gateway-Prefix"); len(prfx) > 0 {
+		for _, p := range i.config.PathPrefixes {
+			if prfx == p || strings.HasPrefix(prfx, p+"/") {
+				prefix = prfx
+				break
+			}
+		}
+	}
+	// IPNSHostnameOption might have constructed an IPNS path using the Host header.
+	// In this case, we need the original path for constructing redirects.
+	originalUrlPath := prefix + urlPath
+	if hdr := r.Header.Get("X-Ipns-Original-Path"); len(hdr) > 0 {
+		originalUrlPath = prefix + hdr
+	}
+
+	parsedPath, err := coreiface.ParsePath(urlPath)
+	if err != nil {
+		webError(w, "invalid ipfs path", err, http.StatusBadRequest)
+		return
+	}
+	// Resolve path to the final DAG node for the ETag
+	preamble := &uio.ChunkBuffer{}
+	resolvedPath, err := i.api.SecureResolvePath(ctx, preamble, parsedPath)
+	if err == coreiface.ErrOffline && !i.node.OnlineMode() {
+		webError(w, "ipfs resolve -r "+escapedURLPath, err, http.StatusServiceUnavailable)
+		return
+	} else if err != nil {
+		webError(w, "ipfs resolve -r "+escapedURLPath, err, http.StatusNotFound)
+		return
+	}
+	// Check etag sent back to us
+	etag := "\"" + resolvedPath.Cid().String() + "\""
+	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	cr, err := i.api.Unixfs().CatChunks(ctx, resolvedPath)
+	if err == coreiface.ErrIsDir {
+		http.Redirect(w, r, gopath.Join(originalUrlPath, "index.html"), 302)
+		return
+	} else if err != nil {
+		webError(w, "ipfs cat "+escapedURLPath, err, http.StatusNotFound)
+		return
+	}
+	defer cr.Close()
+
+	i.addUserHeaders(w) // ok, _now_ write user's headers.
+	w.Header().Set("X-IPFS-Path", urlPath)
+	w.Header().Set("Etag", etag)
+
+	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
+		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
+		// set modtime to a really long time ago, since files are immutable and should stay cached
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=21600")
+	}
+
+	if contentType := mime.TypeByExtension(gopath.Ext(urlPath)); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	} else {
+		w.Header().Set("Content-Type", "text/html")
+	}
+
+	if err := copyChunks(w, preamble); err != nil {
+		log.Warningf("error writing response preamble: %v", err)
+	} else if err := copyChunks(w, cr); err != nil {
+		log.Warningf("error writing response body: %v", err)
+	}
+}
+
+func copyChunks(w io.Writer, cr coreiface.ChunkReader) error {
+	for {
+		chunk, err := cr.ReadChunk()
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			return err
+		}
+
+		l := make([]byte, 3)
+		l[0] = byte(len(chunk) >> 16)
+		l[1] = byte(len(chunk) >> 8)
+		l[2] = byte(len(chunk))
+
+		if _, err := w.Write(l); err != nil {
+			return err
+		} else if _, err := w.Write(chunk); err != nil {
+			return err
+		}
 	}
 }
 

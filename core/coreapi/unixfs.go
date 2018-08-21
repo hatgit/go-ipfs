@@ -46,6 +46,23 @@ func (api *UnixfsAPI) Cat(ctx context.Context, p coreiface.Path) (coreiface.Read
 	return r, nil
 }
 
+func (api *UnixfsAPI) CatChunks(ctx context.Context, p coreiface.Path) (coreiface.ChunkReader, error) {
+	dget := api.node.DAG // TODO: use a session here once routing perf issues are resolved
+
+	dagnode, err := resolveNode(ctx, dget, api.node.Namesys, p)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := uio.NewChunkReader(ctx, dagnode, dget)
+	if err == uio.ErrIsDir {
+		return nil, coreiface.ErrIsDir
+	} else if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 // Ls returns the contents of an IPFS or IPNS object(s) at path p, with the format:
 // `<link base58 hash> <link size in bytes> <link name>`
 func (api *UnixfsAPI) Ls(ctx context.Context, p coreiface.Path) ([]*ipld.Link, error) {

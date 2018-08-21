@@ -6,6 +6,7 @@ import (
 
 	context "context"
 
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	opts "github.com/ipfs/go-ipfs/namesys/opts"
 	path "gx/ipfs/QmYKNMEUK7nCVAefgXF1LVtZEZg3uRmBqiae4FJRXDNAyJ/go-path"
 	proquint "gx/ipfs/QmYnf27kzqR2cxt6LFZdrAFJuQd6785fTkBvMuEj9EeRxM/proquint"
@@ -26,4 +27,8 @@ func (r *ProquintResolver) resolveOnce(ctx context.Context, name string, options
 	}
 	// Return a 0 TTL as caching this result is pointless.
 	return path.FromString(string(proquint.Decode(name))), 0, nil
+}
+
+func (r *ProquintResolver) secureResolveOnce(ctx context.Context, cw coreiface.ChunkWriter, name string, options *opts.ResolveOpts) (path.Path, time.Duration, error) {
+	return r.resolveOnce(ctx, name, options)
 }

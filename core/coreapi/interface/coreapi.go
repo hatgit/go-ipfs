@@ -34,6 +34,8 @@ type CoreAPI interface {
 	// ResolvePath resolves the path using Unixfs resolver
 	ResolvePath(context.Context, Path) (ResolvedPath, error)
 
+	SecureResolvePath(context.Context, ChunkWriter, Path) (ResolvedPath, error)
+
 	// ResolveNode resolves the path (if not resolved already) using Unixfs
 	// resolver, gets and returns the resolved Node
 	ResolveNode(context.Context, Path) (ipld.Node, error)

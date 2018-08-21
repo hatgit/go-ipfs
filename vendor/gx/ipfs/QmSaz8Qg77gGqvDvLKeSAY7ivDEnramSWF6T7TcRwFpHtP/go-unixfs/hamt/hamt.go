@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"os"
 
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
+
 	dag "gx/ipfs/QmRy4Qk9hbgFX9NGJRm8rBThrA8PZhNCitMgeRYyZ67s59/go-merkledag"
 	format "gx/ipfs/QmSaz8Qg77gGqvDvLKeSAY7ivDEnramSWF6T7TcRwFpHtP/go-unixfs"
 	upb "gx/ipfs/QmSaz8Qg77gGqvDvLKeSAY7ivDEnramSWF6T7TcRwFpHtP/go-unixfs/pb"
@@ -261,6 +263,21 @@ func (ds *Shard) Find(ctx context.Context, name string) (*ipld.Link, error) {
 	return out, nil
 }
 
+func (ds *Shard) SecureFind(ctx context.Context, cw coreiface.ChunkWriter, name string) (*ipld.Link, error) {
+	hv := &hashBits{b: hash([]byte(name))}
+
+	var out *ipld.Link
+	err := ds.secureGetValue(ctx, cw, hv, name, func(sv *shardValue) error {
+		out = sv.val
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
 // getChild returns the i'th child of this shard. If it is cached in the
 // children array, it will return it from there. Otherwise, it loads the child
 // node from disk.
@@ -378,6 +395,47 @@ func (ds *Shard) getValue(ctx context.Context, hv *hashBits, key string, cb func
 		switch child := child.(type) {
 		case *Shard:
 			return child.getValue(ctx, hv, key, cb)
+		case *shardValue:
+			if child.key == key {
+				return cb(child)
+			}
+		}
+	}
+
+	return os.ErrNotExist
+}
+
+func hamtChunk(nd *dag.ProtoNode, cindex int) []byte {
+	name := nd.Links()[cindex].Name
+	raw := nd.RawData()
+
+	buff := make([]byte, 4+len(name)+len(raw))
+	buff[0] = 1
+	buff[1] = byte(len(name) >> 16)
+	buff[2] = byte(len(name) >> 8)
+	buff[3] = byte(len(name))
+	copy(buff[4:], []byte(name))
+	copy(buff[4+len(name):], raw)
+
+	return buff
+}
+
+func (ds *Shard) secureGetValue(ctx context.Context, cw coreiface.ChunkWriter, hv *hashBits, key string, cb func(*shardValue) error) error {
+	idx := hv.Next(ds.tableSizeLg2)
+	if ds.bitfield.Bit(int(idx)) {
+		cindex := ds.indexForBitPos(idx)
+
+		child, err := ds.getChild(ctx, cindex)
+		if err != nil {
+			return err
+		}
+		if err := cw.WriteChunk(hamtChunk(ds.nd, cindex)); err != nil {
+			return err
+		}
+
+		switch child := child.(type) {
+		case *Shard:
+			return child.secureGetValue(ctx, cw, hv, key, cb)
 		case *shardValue:
 			if child.key == key {
 				return cb(child)

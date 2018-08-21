@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	coreiface "github.com/ipfs/go-ipfs/core/coreapi/interface"
 	opts "github.com/ipfs/go-ipfs/namesys/opts"
 	path "gx/ipfs/QmYKNMEUK7nCVAefgXF1LVtZEZg3uRmBqiae4FJRXDNAyJ/go-path"
 
@@ -64,6 +65,18 @@ func (ns *mpns) Resolve(ctx context.Context, name string, options ...opts.Resolv
 	return resolve(ctx, ns, name, opts.ProcessOpts(options), "/ipns/")
 }
 
+func (ns *mpns) SecureResolve(ctx context.Context, cw coreiface.ChunkWriter, name string, options ...opts.ResolveOpt) (path.Path, error) {
+	if strings.HasPrefix(name, "/ipfs/") {
+		return path.ParsePath(name)
+	}
+
+	if !strings.HasPrefix(name, "/") {
+		return path.ParsePath("/ipfs/" + name)
+	}
+
+	return secureResolve(ctx, cw, ns, name, opts.ProcessOpts(options), "/ipns/")
+}
+
 // resolveOnce implements resolver.
 func (ns *mpns) resolveOnce(ctx context.Context, name string, options *opts.ResolveOpts) (path.Path, time.Duration, error) {
 	if !strings.HasPrefix(name, "/ipns/") {
@@ -99,6 +112,44 @@ func (ns *mpns) resolveOnce(ctx context.Context, name string, options *opts.Reso
 			return "", 0, ErrResolveFailed
 		}
 		ns.cacheSet(key, p, ttl)
+	}
+
+	if len(segments) > 3 {
+		p, err = path.FromSegments("", strings.TrimRight(p.String(), "/"), segments[3])
+	}
+	return p, 0, err
+}
+
+func (ns *mpns) secureResolveOnce(ctx context.Context, cw coreiface.ChunkWriter, name string, options *opts.ResolveOpts) (path.Path, time.Duration, error) {
+	if !strings.HasPrefix(name, "/ipns/") {
+		name = "/ipns/" + name
+	}
+	segments := strings.SplitN(name, "/", 4)
+	if len(segments) < 3 || segments[0] != "" {
+		log.Debugf("invalid name syntax for %s", name)
+		return "", 0, ErrResolveFailed
+	}
+
+	key := segments[2]
+
+	// Resolver selection:
+	// 1. if it is a multihash resolve through "ipns".
+	// 2. if it is a domain name, resolve through "dns"
+	// 3. otherwise resolve through the "proquint" resolver
+	var res resolver
+	if _, err := mh.FromB58String(key); err == nil {
+		res = ns.ipnsResolver
+	} else if isd.IsDomain(key) {
+		res = ns.dnsResolver
+	} else {
+		// JS client doesn't support proquint.
+		log.Debugf("unable to select resolver for %s", name)
+		return "", 0, ErrResolveFailed
+	}
+
+	p, _, err := res.secureResolveOnce(ctx, cw, key, options)
+	if err != nil {
+		return "", 0, err
 	}
 
 	if len(segments) > 3 {

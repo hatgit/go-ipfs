@@ -15,6 +15,17 @@ type UnixfsAPI interface {
 	// Cat returns a reader for the file
 	Cat(context.Context, Path) (Reader, error)
 
+	CatChunks(context.Context, Path) (ChunkReader, error)
+
 	// Ls returns the list of links in a directory
 	Ls(context.Context, Path) ([]*ipld.Link, error)
+}
+
+type ChunkReader interface {
+	ReadChunk() ([]byte, error)
+	Close() error
+}
+
+type ChunkWriter interface {
+	WriteChunk([]byte) error
 }
