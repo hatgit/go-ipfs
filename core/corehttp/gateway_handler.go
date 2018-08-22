@@ -202,6 +202,7 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPFS-Path", urlPath)
 	w.Header().Set("Etag", etag)
+	w.Header().Set("Cache-Tag", etag)
 
 	// set 'allowed' headers
 	// & expose those headers
@@ -423,6 +424,7 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPFS-Path", urlPath)
 	w.Header().Set("Etag", etag)
+	w.Header().Set("Cache-Tag", etag)
 
 	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
 		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
