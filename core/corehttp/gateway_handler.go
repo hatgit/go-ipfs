@@ -703,6 +703,8 @@ func webError(w http.ResponseWriter, message string, err error, defaultCode int)
 		webErrorWithCode(w, message, err, http.StatusNotFound)
 	} else if err == routing.ErrNotFound {
 		webErrorWithCode(w, message, err, http.StatusNotFound)
+	} else if err == routing.ErrForbidden {
+		webErrorWithCode(w, message, err, http.StatusForbidden)
 	} else if err == context.DeadlineExceeded {
 		webErrorWithCode(w, message, err, http.StatusRequestTimeout)
 	} else {

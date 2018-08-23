@@ -13,6 +13,7 @@ import (
 	cid "gx/ipfs/QmYVNvtQkeZ6AKSwDrjQTs432QtL6umrrK41EBq3cu7iSP/go-cid"
 	ipld "gx/ipfs/QmZtNq8dArGfnpCZfx2pUNY7UcjGhVp5qqwQ4hH6mpTMRQ/go-ipld-format"
 	logging "gx/ipfs/QmcVVHfdyv15GVPk7NrxdWjh2hLVccXnoD8j2tyQShiXJb/go-log"
+	routing "gx/ipfs/QmZ383TySJVeZWzGnWui6pRcKyYZk9VkKTuW7tmKRWk5au/go-libp2p-routing"
 )
 
 var log = logging.Logger("pathresolv")
@@ -64,7 +65,7 @@ func (r *Resolver) ResolveToLastNode(ctx context.Context, fpath path.Path) (ipld
 	}
 
 	nd, err := r.DAG.Get(ctx, c)
-	if err != nil {
+	if err != nil && err != routing.ErrForbidden {
 		return nil, nil, err
 	}
 
@@ -83,11 +84,13 @@ func (r *Resolver) ResolveToLastNode(ctx context.Context, fpath path.Path) (ipld
 		}
 
 		next, err := lnk.GetNode(ctx, r.DAG)
-		if err != nil {
-			return nil, nil, err
-		}
 		nd = next
 		p = rest
+		if err == routing.ErrForbidden {
+			break
+		} else if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	if len(p) == 0 {

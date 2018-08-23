@@ -16,6 +16,9 @@ import (
 // ErrNotFound is returned when a search fails to find anything
 var ErrNotFound = errors.New("routing: not found")
 
+// ErrForbidden is returned when the search is for blocked content.
+var ErrForbidden = errors.New("routing: content is unavailable because it violates the gateway's terms of service")
+
 // ErrNotSupported is returned when a search or put fails because the key type
 // isn't supported.
 var ErrNotSupported = errors.New("routing: operation or key not supported")
