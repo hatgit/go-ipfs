@@ -192,6 +192,8 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 		return
 	}
 
+	w.Header().Set("Vary", "X-Ipfs-Secure-Gateway")
+
 	// Check etag send back to us
 	etag := "\"" + resolvedPath.Cid().String() + "\""
 	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
@@ -404,8 +406,12 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 		webError(w, "ipfs resolve -r "+escapedURLPath, err, http.StatusNotFound)
 		return
 	}
+
+	w.Header().Set("Vary", "X-Ipfs-Secure-Gateway")
+
 	// Check etag sent back to us
-	etag := "\"" + resolvedPath.Cid().String() + "\""
+	etag := "\"sec-" + resolvedPath.Cid().String() + "\""
+	cacheTag := "\"" + resolvedPath.Cid().String() + "\""
 	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -424,7 +430,7 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
 	w.Header().Set("X-IPFS-Path", urlPath)
 	w.Header().Set("Etag", etag)
-	w.Header().Set("Cache-Tag", etag)
+	w.Header().Set("Cache-Tag", cacheTag)
 
 	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
 		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
