@@ -192,19 +192,29 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 		return
 	}
 
-	w.Header().Set("Vary", "X-Ipfs-Secure-Gateway")
-
-	// Check etag send back to us
+	// Deal with cache headers.
 	etag := "\"" + resolvedPath.Cid().String() + "\""
+
+	w.Header().Set("Vary", "X-Ipfs-Secure-Gateway")
+	w.Header().Set("X-IPFS-Path", urlPath)
+	w.Header().Set("Etag", etag)
+	w.Header().Set("Cache-Tag", etag)
+
+	modtime := time.Now()
+	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
+		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
+		// set modtime to a really long time ago, since files are immutable and should stay cached
+		modtime = time.Unix(1, 0)
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=21600")
+	}
+
 	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
-	w.Header().Set("X-IPFS-Path", urlPath)
-	w.Header().Set("Etag", etag)
-	w.Header().Set("Cache-Tag", etag)
 
 	// set 'allowed' headers
 	// & expose those headers
@@ -250,19 +260,6 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 
 		suborigin := pathComponents[1] + "000" + strings.ToLower(base32Encoded)
 		w.Header().Set("Suborigin", suborigin)
-	}
-
-	// set these headers _after_ the error, for we may just not have it
-	// and dont want the client to cache a 500 response...
-	// and only if it's /ipfs!
-	// TODO: break this out when we split /ipfs /ipns routes.
-	modtime := time.Now()
-	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
-		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
-		// set modtime to a really long time ago, since files are immutable and should stay cached
-		modtime = time.Unix(1, 0)
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=21600")
 	}
 
 	if !dir {
@@ -408,13 +405,33 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	}
 
 	w.Header().Set("Vary", "X-Ipfs-Secure-Gateway")
+	w.Header().Set("X-IPFS-Path", urlPath)
 
-	// Check etag sent back to us
+	// Deal with cache headers.
 	etag := "\"sec-" + resolvedPath.Cid().String() + "\""
 	cacheTag := "\"" + resolvedPath.Cid().String() + "\""
+
+	w.Header().Set("Etag", etag)
+	w.Header().Set("Cache-Tag", cacheTag)
+
+	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
+		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=21600")
+		w.Header().Set("Last-Modified", time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
+	}
+
 	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
+		if strings.HasPrefix(urlPath, ipfsPathPrefix) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		lm, err := time.Parse("Mon, 02 Jan 2006 15:04:05 GMT", r.Header.Get("If-Modified-Since"))
+		if err == nil && time.Since(lm) < 12*time.Hour {
+			w.Header().Set("Last-Modified", r.Header.Get("If-Modified-Since"))
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
 
 	cr, err := i.api.Unixfs().CatChunks(ctx, resolvedPath)
@@ -428,16 +445,6 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	defer cr.Close()
 
 	i.addUserHeaders(w) // ok, _now_ write user's headers.
-	w.Header().Set("X-IPFS-Path", urlPath)
-	w.Header().Set("Etag", etag)
-	w.Header().Set("Cache-Tag", cacheTag)
-
-	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
-		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
-		// set modtime to a really long time ago, since files are immutable and should stay cached
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=21600")
-	}
 
 	if contentType := mime.TypeByExtension(gopath.Ext(urlPath)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
