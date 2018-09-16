@@ -408,30 +408,22 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	w.Header().Set("X-IPFS-Path", urlPath)
 
 	// Deal with cache headers.
-	etag := "\"sec-" + resolvedPath.Cid().String() + "\""
+	etag := "\"sec-" + resolvedPath.Cid().String()
 	cacheTag := "\"" + resolvedPath.Cid().String() + "\""
 
+	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
+		etag += "\""
+		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
+	} else {
+		etag += "-" + fmt.Sprint(time.Now().UnixNano()/int64(11*time.Hour)) + "\""
+		w.Header().Set("Cache-Control", "public, max-age=21600")
+	}
 	w.Header().Set("Etag", etag)
 	w.Header().Set("Cache-Tag", cacheTag)
 
-	if strings.HasPrefix(urlPath, ipfsPathPrefix) {
-		w.Header().Set("Cache-Control", "public, max-age=29030400, immutable")
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=21600")
-		w.Header().Set("Last-Modified", time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
-	}
-
 	if r.Header.Get("If-None-Match") == etag || r.Header.Get("If-None-Match") == "W/"+etag {
-		if strings.HasPrefix(urlPath, ipfsPathPrefix) {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		lm, err := time.Parse("Mon, 02 Jan 2006 15:04:05 GMT", r.Header.Get("If-Modified-Since"))
-		if err == nil && time.Since(lm) < 12*time.Hour {
-			w.Header().Set("Last-Modified", r.Header.Get("If-Modified-Since"))
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
+		w.WriteHeader(http.StatusNotModified)
+		return
 	}
 
 	cr, err := i.api.Unixfs().CatChunks(ctx, resolvedPath)
