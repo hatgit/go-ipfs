@@ -307,6 +307,7 @@ func (i *gatewayHandler) getOrHeadHandler(ctx context.Context, w http.ResponseWr
 	case os.IsNotExist(err):
 	}
 
+	w.Header().Set("Content-Type", "text/html")
 	if r.Method == "HEAD" {
 		return
 	}
@@ -441,7 +442,20 @@ func (i *gatewayHandler) secureGetHandler(ctx context.Context, w http.ResponseWr
 	if contentType := mime.TypeByExtension(gopath.Ext(urlPath)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	} else {
-		w.Header().Set("Content-Type", "text/html")
+		dr, err := i.api.Unixfs().Cat(ctx, resolvedPath)
+		if err != nil {
+			webError(w, "ipfs cat "+escapedURLPath, err, http.StatusNotFound)
+			return
+		}
+		sample := make([]byte, 512)
+		n, err := io.ReadFull(dr, sample)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			webError(w, "ipfs cat "+escapedURLPath, err, http.StatusNotFound)
+			return
+		}
+		dr.Close()
+
+		w.Header().Set("Content-Type", http.DetectContentType(sample[:n]))
 	}
 
 	if err := copyChunks(w, preamble); err != nil {
